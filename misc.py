@@ -4,11 +4,11 @@ import warnings
 import matplotlib.pyplot as plt
 
 
-with open('settings.json') as f:
+with open("settings.json") as f:
     config = json.load(f)
 
 global GPU_flag
-GPU_flag = config['use_GPU']
+GPU_flag = config["use_GPU"]
 
 
 if GPU_flag:
@@ -16,9 +16,9 @@ if GPU_flag:
         import cupy as cp
         from cupyx.scipy.ndimage import zoom
         import cupyx.scipy.fft as gfft
-        
+
     except ImportError:
-        warnings.warn('CuPy is not installed. Using NumPy backend.')
+        warnings.warn("CuPy is not installed. Using NumPy backend.")
         GPU_flag = False
         xp = np
         from scipy.ndimage import zoom
@@ -38,20 +38,22 @@ def SaveVideo(frames_batch):
     try:
         import cv2
     except ImportError:
-        warnings.warn('OpenCV is not installed. Cannot write video.')
+        warnings.warn("OpenCV is not installed. Cannot write video.")
         return
 
     colormap = cm.viridis
     scale_factor = 2
     normalizer = xp.abs(frames_batch).max()
 
-    output_video_path = 'output/screens.mp4'
+    output_video_path = "output/screens.mp4"
     height, width, layers = frames_batch.shape
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec used to compress the frames
-    video  = cv2.VideoWriter(output_video_path, fourcc, 20.0, (width*scale_factor, height*scale_factor))
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # Codec used to compress the frames
+    video = cv2.VideoWriter(
+        output_video_path, fourcc, 20.0, (width * scale_factor, height * scale_factor)
+    )
 
-    print('Writing video...')
+    print("Writing video...")
     for i in tqdm(range(layers)):
         buf = (frames_batch[..., i] + normalizer) / 2 / normalizer
         if GPU_flag:
@@ -62,35 +64,37 @@ def SaveVideo(frames_batch):
         video.write(frame)
 
     video.release()
-    
-    
-def mask_circle(N, r, center=(0,0), centered=True):
+
+
+def mask_circle(N, r, center=(0, 0), centered=True):
     """Generates a circular mask of radius r in a grid of size N."""
-    factor = 0.5 * (1-N%2)
+    factor = 0.5 * (1 - N % 2)
     if centered:
-        coord_range = np.linspace(-N//2+N%2+factor, N//2-factor, N)
+        coord_range = np.linspace(-N // 2 + N % 2 + factor, N // 2 - factor, N)
     else:
-        coord_range = np.linspace(0, N-1, N)
-    xx, yy = np.meshgrid(coord_range-center[1], coord_range-center[0])
+        coord_range = np.linspace(0, N - 1, N)
+    xx, yy = np.meshgrid(coord_range - center[1], coord_range - center[0])
     pupil_round = np.zeros([N, N], dtype=np.int32)
-    pupil_round[np.sqrt(yy**2+xx**2) < r] = 1
+    pupil_round[np.sqrt(yy**2 + xx**2) < r] = 1
     return pupil_round
 
 
 def radial_profile(data, center):
     y, x = np.indices((data.shape))
-    r = np.sqrt( (x-center[0])**2 + (y-center[1])**2 )
-    r = r.astype('int')
+    r = np.sqrt((x - center[0]) ** 2 + (y - center[1]) ** 2)
+    r = r.astype("int")
     tbin = np.bincount(r.ravel(), data.ravel())
     nr = np.bincount(r.ravel())
     radialprofile = tbin / nr
     return radialprofile
-   
- 
-def PSD_to_phase(phase_batch): 
+
+
+def PSD_to_phase(phase_batch):
     N_, _, num_screens = phase_batch.shape
     hanning_window = (np.hanning(N_).reshape(-1, 1) * np.hanning(N_))[..., None]
-    hanning_window = xp.array(hanning_window, dtype=phase_batch.dtype) * 1.6322**2 # Corrective factor
+    hanning_window = (
+        xp.array(hanning_window, dtype=phase_batch.dtype) * 1.6322**2
+    )  # Corrective factor
 
     if phase_batch.dtype == xp.float32:
         datacomplex = xp.complex64
@@ -101,21 +105,31 @@ def PSD_to_phase(phase_batch):
     FFT_batch = xp.zeros([N_, N_, num_screens], dtype=datacomplex)
 
     if GPU_flag:
-        plan = gfft.get_fft_plan(FFT_batch, axes=(0,1), value_type='C2C')
+        plan = gfft.get_fft_plan(FFT_batch, axes=(0, 1), value_type="C2C")
 
         FFT_batch = gfft.fftshift(
-            gfft.fft2(gfft.fftshift(phase_batch*hanning_window, axes=(0,1)), axes=(0,1), plan=plan) / N_**2, axes=(0,1)        
+            gfft.fft2(
+                gfft.fftshift(phase_batch * hanning_window, axes=(0, 1)),
+                axes=(0, 1),
+                plan=plan,
+            )
+            / N_**2,
+            axes=(0, 1),
         )
     else:
         FFT_batch = np.fft.fftshift(
-            np.fft.fft2(np.fft.fftshift(phase_batch*hanning_window, axes=(0,1)), axes=(0,1)) / N_**2, axes=(0,1)        
+            np.fft.fft2(
+                np.fft.fftshift(phase_batch * hanning_window, axes=(0, 1)), axes=(0, 1)
+            )
+            / N_**2,
+            axes=(0, 1),
         )
-        
-    temp_mean = FFT_batch.mean(axis=(0,1), keepdims=True)
-    return 2 * xp.mean( xp.abs(FFT_batch-temp_mean)**2, axis=2 )
+
+    temp_mean = FFT_batch.mean(axis=(0, 1), keepdims=True)
+    return 2 * xp.mean(xp.abs(FFT_batch - temp_mean) ** 2, axis=2)
 
 
-'''
+"""
 def PSD_to_phase_advanced(phase_batch):
     N_, _, N_screens = phase_batch.shape
     batch_size = 32
@@ -142,12 +156,10 @@ def PSD_to_phase_advanced(phase_batch):
         variance_batches = variance_batches / N_batches
 
     return cupyx.scipy.ndimage.zoom(variance_batches, N_/(pad_size*2+N_), order=3)
-'''
+"""
 
 
-
-
-'''
+"""
 N_new = screen_generator.N
 _,_,f_0, df_0 = screen_generator.freq_array(N_new, dx=r0/3.0)
 
@@ -211,4 +223,4 @@ PSDec = PSD_to_phase(resulto)
 
 
 plt.imshow(np.log(PSDec.get()))
-'''
+"""
